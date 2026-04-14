@@ -74,51 +74,24 @@ Place the dataset files (`.pkl` or `.dat`) under a `data/` directory.
 
 ```bash
 # RadioML2016.10a (11 classes)
-python train.py --dataset_path data/RML2016.10a_dict.pkl --num_classes 11
+python train_radioml2016a.py
 
 # RadioML2016.10b (10 classes)
-python train.py --dataset_path data/RML2016.10b.dat --num_classes 10
-
-# Multi-seed statistical evaluation (4 runs as in the paper)
-python train.py --dataset_path data/RML2016.10a_dict.pkl --num_classes 11 \
-                --seeds 42 128 256 512
+python train_radioml2016b.py
 ```
 
-### Evaluation
-
-```bash
-python evaluate.py --dataset_path data/RML2016.10a_dict.pkl \
-                   --checkpoint best_biolamr_seed42.pth \
-                   --num_classes 11
-```
-
-This generates overall metrics, per-SNR accuracy, a confusion matrix, and a t-SNE feature visualization.
+Note: Please modify the dataset path in each training script before running.
 
 ## File Structure
 
 ```
 BioLAMR/
-├── biolamr.py       # Model definition (BioLAMR, LDDF, SignalEmbedding, etc.)
-├── dataset.py       # RadioML dataset loading and stratified splitting
-├── train.py         # Training script with hierarchical LR and early stopping
-├── evaluate.py      # Evaluation: metrics, confusion matrix, t-SNE
+├── biolamr.py              # Model definition (BioLAMR, LDDF, SignalEmbedding, etc.)
+├── train_radioml2016a.py   # Training script for RadioML2016.10a
+├── train_radioml2016b.py   # Training script for RadioML2016.10b
 ├── requirements.txt
 ├── .gitignore
 └── README.md
-```
-
-## Citation
-
-If you find this work useful, please cite:
-
-```bibtex
-@article{mao2026biolamr,
-  title     = {BioLAMR: A Biomimetically Inspired Large Language Model Adaptation
-               Framework for Automatic Modulation Recognition},
-  author    = {Mao, Yubo and Xu, Wei and Sang, Jijia and Liu, Haoan},
-  journal   = {Biomimetics},
-  year      = {2026}
-}
 ```
 
 ## License
