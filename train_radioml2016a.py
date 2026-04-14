@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BioLAMR 修复版训练脚本 - RML2016
-解决训练准确率低于验证准确率的问题
+BioLAMR training script - RML2016.10a
+Fixed version: resolves train accuracy lower than validation accuracy
 """
 
 import os
@@ -20,7 +20,7 @@ from biolamr import BioLAMR, BioLAMRLoss
 
 
 class FixedBioLAMR(BioLAMR):
-    """修复版BioLAMR - 平衡的正则化策略"""
+    """Fixed BioLAMR - balanced regularization strategy"""
     
     def __init__(self, gpt_type='gpt2', num_classes=11, seq_len=128, 
                  input_channels=2, use_dual_domain=True, dropout=0.15):
@@ -35,7 +35,7 @@ class FixedBioLAMR(BioLAMR):
             res_layers=4,
             res_dim=64,
             patch_size=16,
-            dropout=dropout,  # 使用传入的dropout值
+            dropout=dropout,  # Use the passed dropout value
             gpu_id=0
         )
         
@@ -43,21 +43,21 @@ class FixedBioLAMR(BioLAMR):
         self._add_balanced_regularization(dropout)
     
     def _configure_trainable_parameters(self):
-        """配置可训练参数"""
-        print("配置参数微调策略...")
+        """Configure trainable parameters"""
+        print("Configuring parameter fine-tuning strategy...")
         
         for param in self.gpt2.parameters():
             param.requires_grad = False
         
         trainable_count = 0
         
-        # 解冻LayerNorm和位置编码
+        # Unfreeze LayerNorm and position encoding
         for name, param in self.gpt2.named_parameters():
             if 'ln' in name or 'wpe' in name:
                 param.requires_grad = True
                 trainable_count += 1
         
-        # 解冻最后2层的注意力
+        # Unfreeze attention in the last 2 layers
         num_layers = len(self.gpt2.h)
         for i in range(num_layers - 2, num_layers):
             for name, param in self.gpt2.h[i].named_parameters():
@@ -65,7 +65,7 @@ class FixedBioLAMR(BioLAMR):
                     param.requires_grad = True
                     trainable_count += 1
         
-        # 解冻最后一层的MLP
+        # Unfreeze MLP in the last layer
         for param in self.gpt2.h[-1].mlp.parameters():
             param.requires_grad = True
             trainable_count += 1
@@ -73,39 +73,39 @@ class FixedBioLAMR(BioLAMR):
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         
-        print(f"总参数: {total_params:,}")
-        print(f"可训练参数: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
     
     def _add_balanced_regularization(self, dropout):
-        """添加平衡的正则化 - 不过度影响训练准确率"""
+        """Add balanced regularization - without overly affecting train accuracy"""
         if hasattr(self, 'classifier'):
             old_classifier = self.classifier
-            # 只在分类头前添加一次适度的Dropout
+            # Add a moderate Dropout before the classification head
             self.classifier = nn.Sequential(
-                nn.Dropout(dropout),  # 使用配置的dropout值
+                nn.Dropout(dropout),  # Use the configured dropout value
                 old_classifier
             )
         
-        print(f"添加正则化层: Dropout={dropout}")
+        print(f"Added regularization layer: Dropout={dropout}")
 
 
 class RML2016Dataset:
-    """RML2016数据集 - 简化版"""
+    """RML2016 dataset - simplified version"""
     
     def __init__(self, pkl_file, min_snr=-20, max_snr=18):
-        print("加载 RML2016 数据...")
+        print("Loading RML2016 data...")
         with open(pkl_file, 'rb') as f:
             self.raw_data = pickle.load(f, encoding='latin1')
         
-        # 收集调制类型
+        # Collect modulation types
         all_mods = sorted(list(set([mod for (mod, snr) in self.raw_data.keys()])))
         self.classes = all_mods
         self.label_encoder = LabelEncoder()
         self.label_encoder.fit(self.classes)
         
-        print(f"调制类型: {self.classes}")
+        print(f"Modulation types: {self.classes}")
         
-        # 处理数据
+        # Process data
         samples, labels, snrs = [], [], []
         for (mod, snr), data in self.raw_data.items():
             if min_snr <= snr <= max_snr:
@@ -118,10 +118,10 @@ class RML2016Dataset:
         self.Y = self.label_encoder.transform(labels).astype(np.int64)
         self.SNR = np.array(snrs, dtype=np.float32)
         
-        # 标准化
+        # Normalization
         self.X = (self.X - np.mean(self.X)) / (np.std(self.X) + 1e-8)
         
-        print(f"数据加载完成: {len(self.X)} 样本, {len(self.classes)} 类别")
+        print(f"Data loaded: {len(self.X)} samples, {len(self.classes)} classes")
     
     def __len__(self):
         return len(self.X)
@@ -131,7 +131,7 @@ class RML2016Dataset:
 
 
 class SubsetDataset:
-    """子数据集"""
+    """Subset dataset"""
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
@@ -144,7 +144,7 @@ class SubsetDataset:
 
 
 def stratified_split(dataset, test_size=0.10, val_size=0.10, random_state=42):
-    """分层抽样划分"""
+    """Stratified split"""
     indices = np.arange(len(dataset))
     train_val_idx, test_idx = train_test_split(
         indices, test_size=test_size, random_state=random_state,
@@ -163,7 +163,7 @@ def stratified_split(dataset, test_size=0.10, val_size=0.10, random_state=42):
 
 
 class FixedTrainer:
-    """修复版训练器"""
+    """Fixed trainer with hierarchical learning rates"""
     
     def __init__(self, model, device='cuda', learning_rate=0.0005, 
                  weight_decay=0.01, epochs=50, patience=10, 
@@ -175,28 +175,28 @@ class FixedTrainer:
         self.patience = patience
         self.grad_clip_norm = grad_clip_norm
         
-        # 修复后的损失函数 - 降低标签平滑
+        # Loss function with reduced label smoothing
         self.criterion = BioLAMRLoss(
             num_classes=model.num_classes, 
             label_smoothing=label_smoothing
         )
         
-        print(f"✅ 损失函数: 标签平滑={label_smoothing} (降低训练准确率惩罚)")
+        print(f"Loss function: label_smoothing={label_smoothing}")
         
-        # 优化器
+        # Optimizer
         self._setup_optimizer(weight_decay)
         
-        # 学习率调度器
-        self.scheduler = None  # 将在train中初始化
+        # Learning rate scheduler
+        self.scheduler = None  # Initialized in train()
         
-        # 训练历史
+        # Training history
         self.history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": []}
         self.best_val_acc = 0
         self.early_stop_counter = 0
         self.best_model_path = "best_biolamr_rml2016a.pth"
     
     def _setup_optimizer(self, weight_decay):
-        """设置优化器"""
+        """Setup optimizer with hierarchical learning rates"""
         gpt2_params = []
         new_params = []
         
@@ -212,10 +212,10 @@ class FixedTrainer:
             {'params': new_params, 'lr': self.learning_rate}
         ], weight_decay=weight_decay)
         
-        print(f"✅ 优化器: LR={self.learning_rate}, Weight Decay={weight_decay}")
+        print(f"Optimizer: LR={self.learning_rate}, Weight Decay={weight_decay}")
     
     def train_epoch(self, train_loader):
-        """训练一个epoch"""
+        """Train one epoch"""
         self.model.train()
         total_loss, correct, total = 0, 0, 0
         
@@ -228,7 +228,7 @@ class FixedTrainer:
             loss = self.criterion(output, target)
             loss.backward()
             
-            # 修复后的梯度裁剪
+            # Gradient clipping
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip_norm)
             
             self.optimizer.step()
@@ -249,7 +249,7 @@ class FixedTrainer:
         return total_loss / len(train_loader), 100. * correct / total
     
     def validate(self, val_loader):
-        """验证"""
+        """Validate"""
         self.model.eval()
         total_loss, correct, total = 0, 0, 0
         
@@ -267,10 +267,10 @@ class FixedTrainer:
         return total_loss / len(val_loader), 100. * correct / total
     
     def train(self, train_loader, val_loader):
-        """完整训练"""
-        print(f"开始训练 (设备: {self.device})")
+        """Full training loop"""
+        print(f"Starting training (device: {self.device})")
         
-        # 初始化调度器
+        # Initialize scheduler
         self.scheduler = optim.lr_scheduler.OneCycleLR(
             self.optimizer, max_lr=self.learning_rate,
             epochs=self.epochs, steps_per_epoch=len(train_loader),
@@ -289,9 +289,9 @@ class FixedTrainer:
             self.history["train_acc"].append(train_acc)
             self.history["val_acc"].append(val_acc)
             
-            print(f"训练 - 损失: {train_loss:.6f}, 准确率: {train_acc:.2f}%")
-            print(f"验证 - 损失: {val_loss:.6f}, 准确率: {val_acc:.2f}%")
-            print(f"📊 准确率差距: {abs(val_acc - train_acc):.2f}%")
+            print(f"Train - Loss: {train_loss:.6f}, Acc: {train_acc:.2f}%")
+            print(f"Val   - Loss: {val_loss:.6f}, Acc: {val_acc:.2f}%")
+            print(f"Acc gap: {abs(val_acc - train_acc):.2f}%")
             
             if val_acc > self.best_val_acc:
                 self.best_val_acc = val_acc
@@ -301,23 +301,23 @@ class FixedTrainer:
                     'model_state_dict': self.model.state_dict(),
                     'val_acc': val_acc,
                 }, self.best_model_path)
-                print(f"✅ 保存最佳模型 (验证准确率: {val_acc:.2f}%)")
+                print(f"Saved best model (val acc: {val_acc:.2f}%)")
             else:
                 self.early_stop_counter += 1
-                print(f"⚠️  早停计数: {self.early_stop_counter}/{self.patience}")
+                print(f"Early stop counter: {self.early_stop_counter}/{self.patience}")
                 if self.early_stop_counter >= self.patience:
-                    print(f"早停触发! 最佳验证准确率: {self.best_val_acc:.2f}%")
+                    print(f"Early stopping triggered! Best val acc: {self.best_val_acc:.2f}%")
                     break
         
-        print(f"\n✅ 训练完成! 最佳验证准确率: {self.best_val_acc:.2f}%")
+        print(f"\nTraining complete! Best val acc: {self.best_val_acc:.2f}%")
         return self.history
 
 
 def plot_training_curves(history):
-    """绘制训练曲线 - 只显示损失和准确率"""
+    """Plot training curves - loss and accuracy"""
     plt.figure(figsize=(12, 5))
 
-    # 损失曲线
+    # Loss curves
     plt.subplot(1, 2, 1)
     plt.plot(history['train_loss'], label='Training Loss', linewidth=2)
     plt.plot(history['val_loss'], label='Validation Loss', linewidth=2)
@@ -327,7 +327,7 @@ def plot_training_curves(history):
     plt.legend()
     plt.grid(True, alpha=0.3)
 
-    # 准确率曲线
+    # Accuracy curves
     plt.subplot(1, 2, 2)
     plt.plot(history['train_acc'], label='Training Accuracy', linewidth=2)
     plt.plot(history['val_acc'], label='Validation Accuracy', linewidth=2)
@@ -343,16 +343,16 @@ def plot_training_curves(history):
 
 
 def main():
-    """主函数 - 修复版配置"""
+    """Main function - fixed configuration"""
     config = {
         'batch_size': 128,
         'epochs': 30,
-        'learning_rate': 0.0005,      # ✅ 提高学习率
-        'weight_decay': 0.01,         # ✅ 降低权重衰减
-        'patience': 10,               # ✅ 更宽容的早停
-        'label_smoothing': 0.05,      # ✅ 关键: 降低标签平滑
-        'dropout': 0.15,              # ✅ 关键: 降低Dropout
-        'grad_clip_norm': 1.0,        # ✅ 放宽梯度裁剪
+        'learning_rate': 0.0005,
+        'weight_decay': 0.01,
+        'patience': 10,
+        'label_smoothing': 0.05,
+        'dropout': 0.15,
+        'grad_clip_norm': 1.0,
         'num_workers': 4,
         'min_snr': -20,
         'max_snr': 18,
@@ -363,10 +363,10 @@ def main():
     pkl_file = "/home/caict/code/LLM4RML/data/RML2016.10a/archive/RML2016.10a_dict.pkl"
     
     if not os.path.exists(pkl_file):
-        print(f"❌ 数据文件不存在: {pkl_file}")
+        print(f"Data file not found: {pkl_file}")
         return
     
-    # 加载数据
+    # Load data
     dataset = RML2016Dataset(pkl_file, min_snr=config['min_snr'], max_snr=config['max_snr'])
     train_dataset, val_dataset, test_dataset = stratified_split(dataset)
     
@@ -375,7 +375,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'],
                            shuffle=False, num_workers=config['num_workers'], pin_memory=True)
     
-    # 创建模型
+    # Create model
     model = FixedBioLAMR(
         gpt_type=config['gpt_type'],
         num_classes=len(dataset.classes),
@@ -385,7 +385,7 @@ def main():
         dropout=config['dropout']
     )
     
-    # 训练
+    # Train
     trainer = FixedTrainer(
         model,
         learning_rate=config['learning_rate'],
@@ -398,10 +398,10 @@ def main():
     
     history = trainer.train(train_loader, val_loader)
 
-    print(f"\n✅ 训练完成! 最佳验证准确率: {trainer.best_val_acc:.2f}%")
-    print(f"✅ 模型已保存: {trainer.best_model_path}")
+    print(f"\nTraining complete! Best val acc: {trainer.best_val_acc:.2f}%")
+    print(f"Model saved: {trainer.best_model_path}")
 
-    # 绘制训练曲线
+    # Plot training curves
     plot_training_curves(history)
 
 

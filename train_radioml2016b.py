@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BioLAMR 训练脚本 - RML2016.10b版本
-使用RML2016.10b.dat数据集进行调制识别训练
+BioLAMR training script - RML2016.10b
+Modulation recognition training using the RML2016.10b.dat dataset
 """
 
 import os
@@ -19,31 +19,31 @@ from transformers import GPT2Model
 
 
 class RML2016bDataset(Dataset):
-    """RML2016.10b数据集加载器 - 支持.dat格式"""
+    """RML2016.10b dataset loader - supports .dat format"""
     
     def __init__(self, dat_file, min_snr=-20, max_snr=18):
         """
-        初始化RML2016.10b数据集
+        Initialize RML2016.10b dataset
         Args:
-            dat_file: RML2016.10b.dat文件路径
-            min_snr: 最小SNR (dB)
-            max_snr: 最大SNR (dB)
+            dat_file: Path to RML2016.10b.dat file
+            min_snr: Minimum SNR (dB)
+            max_snr: Maximum SNR (dB)
         """
-        print("加载 RML2016.10b 数据...")
+        print("Loading RML2016.10b data...")
         
-        # RML2016.10b.dat 是pickle格式的二进制文件
+        # RML2016.10b.dat is a pickle-formatted binary file
         with open(dat_file, 'rb') as f:
             self.raw_data = pickle.load(f, encoding='latin1')
         
-        # 收集调制类型
+        # Collect modulation types
         all_mods = sorted(list(set([mod for (mod, snr) in self.raw_data.keys()])))
         self.classes = all_mods
         self.label_encoder = LabelEncoder()
         self.label_encoder.fit(self.classes)
         
-        print(f"调制类型: {self.classes}")
+        print(f"Modulation types: {self.classes}")
         
-        # 处理数据
+        # Process data
         samples, labels, snrs = [], [], []
         for (mod, snr), data in self.raw_data.items():
             if min_snr <= snr <= max_snr:
@@ -56,19 +56,19 @@ class RML2016bDataset(Dataset):
         self.Y = self.label_encoder.transform(labels).astype(np.int64)
         self.SNR = np.array(snrs, dtype=np.float32)
         
-        # 标准化
+        # Normalization
         self.X = (self.X - np.mean(self.X)) / (np.std(self.X) + 1e-8)
         
-        print(f"数据加载完成: {len(self.X)} 样本, {len(self.classes)} 类别")
-        print(f"数据形状: {self.X.shape}")
-        print(f"SNR范围: {self.SNR.min():.1f} 到 {self.SNR.max():.1f} dB")
+        print(f"Data loaded: {len(self.X)} samples, {len(self.classes)} classes")
+        print(f"Data shape: {self.X.shape}")
+        print(f"SNR range: {self.SNR.min():.1f} to {self.SNR.max():.1f} dB")
         
-        # 显示类别分布
+        # Show class distribution
         unique_labels, counts = np.unique(self.Y, return_counts=True)
-        print(f"\n类别分布:")
+        print(f"\nClass distribution:")
         for label, count in zip(unique_labels, counts):
             mod_name = self.classes[label]
-            print(f"  {mod_name}: {count} 样本 ({count/len(self.Y)*100:.1f}%)")
+            print(f"  {mod_name}: {count} samples ({count/len(self.Y)*100:.1f}%)")
     
     def __len__(self):
         return len(self.X)
@@ -78,7 +78,7 @@ class RML2016bDataset(Dataset):
 
 
 class SubsetDataset:
-    """子数据集"""
+    """Subset dataset"""
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
@@ -91,19 +91,19 @@ class SubsetDataset:
 
 
 def stratified_split(dataset, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_state=42):
-    """分层抽样划分数据集"""
+    """Stratified split of dataset"""
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
     
     indices = np.arange(len(dataset))
     labels = dataset.Y
     
-    # 第一步：分离测试集
+    # Step 1: Separate test set
     train_val_idx, test_idx = train_test_split(
         indices, test_size=test_ratio, random_state=random_state,
         stratify=labels, shuffle=True
     )
     
-    # 第二步：从train_val中分离验证集
+    # Step 2: Separate validation set from train_val
     train_val_labels = labels[train_val_idx]
     val_size = val_ratio / (train_ratio + val_ratio)
     train_idx, val_idx = train_test_split(
@@ -111,16 +111,16 @@ def stratified_split(dataset, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, 
         stratify=train_val_labels, shuffle=True
     )
     
-    print(f"\n数据集划分:")
-    print(f"  训练集: {len(train_idx)} 样本 ({len(train_idx)/len(dataset)*100:.1f}%)")
-    print(f"  验证集: {len(val_idx)} 样本 ({len(val_idx)/len(dataset)*100:.1f}%)")
-    print(f"  测试集: {len(test_idx)} 样本 ({len(test_idx)/len(dataset)*100:.1f}%)")
+    print(f"\nDataset split:")
+    print(f"  Train: {len(train_idx)} samples ({len(train_idx)/len(dataset)*100:.1f}%)")
+    print(f"  Val:   {len(val_idx)} samples ({len(val_idx)/len(dataset)*100:.1f}%)")
+    print(f"  Test:  {len(test_idx)} samples ({len(test_idx)/len(dataset)*100:.1f}%)")
     
     return SubsetDataset(dataset, train_idx), SubsetDataset(dataset, val_idx), SubsetDataset(dataset, test_idx)
 
 
 class FixedBioLAMR(nn.Module):
-    """修复版BioLAMR - 解冻约13%参数（与RML2016a版本一致）"""
+    """Fixed BioLAMR - unfreezes ~13% parameters (consistent with RML2016a version)"""
 
     def __init__(self, gpt_type='gpt2', num_classes=11, seq_len=128,
                  input_channels=2, use_dual_domain=True, dropout=0.15):
@@ -130,20 +130,20 @@ class FixedBioLAMR(nn.Module):
         self.input_channels = input_channels
         self.use_dual_domain = use_dual_domain
         
-        # 加载预训练GPT-2
-        print(f"加载预训练 {gpt_type} 模型...")
+        # Load pretrained GPT-2
+        print(f"Loading pretrained {gpt_type} model...")
         self.gpt2 = GPT2Model.from_pretrained(gpt_type)
         self.hidden_size = self.gpt2.config.hidden_size
         
-        # 信号嵌入层
+        # Signal embedding layer
         self.signal_embedding = nn.Linear(input_channels, self.hidden_size)
         
-        # 双域处理
+        # Dual-domain processing
         if use_dual_domain:
             self.freq_embedding = nn.Linear(input_channels, self.hidden_size)
             self.domain_fusion = nn.Linear(self.hidden_size * 2, self.hidden_size)
         
-        # 分类头
+        # Classification head
         self.classifier = nn.Sequential(
             nn.Linear(self.hidden_size, self.hidden_size // 2),
             nn.ReLU(),
@@ -151,25 +151,25 @@ class FixedBioLAMR(nn.Module):
             nn.Linear(self.hidden_size // 2, num_classes)
         )
         
-        # 配置可训练参数
+        # Configure trainable parameters
         self._configure_trainable_parameters()
     
     def _configure_trainable_parameters(self):
-        """配置可训练参数 - 解冻约13%（与RML2016a版本一致）"""
-        print("配置参数微调策略...")
+        """Configure trainable parameters - unfreeze ~13% (consistent with RML2016a)"""
+        print("Configuring parameter fine-tuning strategy...")
 
         for param in self.gpt2.parameters():
             param.requires_grad = False
 
         trainable_count = 0
 
-        # 解冻LayerNorm和位置编码
+        # Unfreeze LayerNorm and position encoding
         for name, param in self.gpt2.named_parameters():
             if 'ln' in name or 'wpe' in name:
                 param.requires_grad = True
                 trainable_count += 1
 
-        # 解冻最后2层的注意力
+        # Unfreeze attention in the last 2 layers
         num_layers = len(self.gpt2.h)
         for i in range(num_layers - 2, num_layers):
             for name, param in self.gpt2.h[i].named_parameters():
@@ -177,7 +177,7 @@ class FixedBioLAMR(nn.Module):
                     param.requires_grad = True
                     trainable_count += 1
 
-        # 解冻最后一层的MLP
+        # Unfreeze MLP in the last layer
         for param in self.gpt2.h[-1].mlp.parameters():
             param.requires_grad = True
             trainable_count += 1
@@ -185,17 +185,17 @@ class FixedBioLAMR(nn.Module):
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-        print(f"总参数: {total_params:,}")
-        print(f"可训练参数: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
     
     def forward(self, x):
         batch_size = x.size(0)
         x = x.transpose(1, 2)  # (batch, seq_len, channels)
         
-        # 时域嵌入
+        # Time-domain embedding
         time_embed = self.signal_embedding(x)
         
-        # 双域处理
+        # Dual-domain processing
         if self.use_dual_domain:
             x_fft = torch.fft.rfft(x, dim=1)
             x_freq = torch.cat([x_fft.real, x_fft.imag], dim=-1)
@@ -217,11 +217,11 @@ class FixedBioLAMR(nn.Module):
         else:
             embeddings = time_embed
         
-        # GPT-2处理
+        # GPT-2 processing
         outputs = self.gpt2(inputs_embeds=embeddings)
         sequence_output = outputs.last_hidden_state
         
-        # 分类
+        # Classification
         pooled = sequence_output.mean(dim=1)
         logits = self.classifier(pooled)
         
@@ -229,7 +229,7 @@ class FixedBioLAMR(nn.Module):
 
 
 class Trainer:
-    """训练器"""
+    """Trainer"""
     
     def __init__(self, model, train_loader, val_loader, config):
         self.model = model
@@ -240,7 +240,7 @@ class Trainer:
         
         self.model.to(self.device)
         
-        # 优化器
+        # Optimizer
         self.optimizer = optim.AdamW([
             {'params': [p for n, p in model.named_parameters() if p.requires_grad and 'gpt2' in n], 
              'lr': config['learning_rate'] * 0.1},
@@ -248,10 +248,10 @@ class Trainer:
              'lr': config['learning_rate']}
         ], weight_decay=config['weight_decay'])
         
-        # 损失函数
+        # Loss function
         self.criterion = nn.CrossEntropyLoss(label_smoothing=config['label_smoothing'])
         
-        # 学习率调度器
+        # Learning rate scheduler
         self.scheduler = optim.lr_scheduler.OneCycleLR(
             self.optimizer,
             max_lr=[config['learning_rate'] * 0.1, config['learning_rate']],
@@ -272,7 +272,7 @@ class Trainer:
         correct = 0
         total = 0
         
-        pbar = tqdm(self.train_loader, desc='训练')
+        pbar = tqdm(self.train_loader, desc='Training')
         for signals, labels in pbar:
             signals, labels = signals.to(self.device), labels.to(self.device)
             
@@ -301,7 +301,7 @@ class Trainer:
         total = 0
         
         with torch.no_grad():
-            for signals, labels in tqdm(self.val_loader, desc='验证'):
+            for signals, labels in tqdm(self.val_loader, desc='Validation'):
                 signals, labels = signals.to(self.device), labels.to(self.device)
                 outputs = self.model(signals)
                 loss = self.criterion(outputs, labels)
@@ -314,7 +314,7 @@ class Trainer:
         return total_loss / len(self.val_loader), 100. * correct / total
     
     def train(self, train_loader, val_loader):
-        print(f"\n开始训练 (设备: {self.device})...")
+        print(f"\nStarting training (device: {self.device})...")
         
         for epoch in range(self.config['epochs']):
             print(f"\nEpoch {epoch+1}/{self.config['epochs']}")
@@ -327,28 +327,28 @@ class Trainer:
             self.history['train_acc'].append(train_acc)
             self.history['val_acc'].append(val_acc)
             
-            print(f"  训练 - 损失: {train_loss:.6f}, 准确率: {train_acc:.2f}%")
-            print(f"  验证 - 损失: {val_loss:.6f}, 准确率: {val_acc:.2f}%")
+            print(f"  Train - Loss: {train_loss:.6f}, Acc: {train_acc:.2f}%")
+            print(f"  Val   - Loss: {val_loss:.6f}, Acc: {val_acc:.2f}%")
             
             if val_acc > self.best_val_acc:
                 self.best_val_acc = val_acc
                 torch.save(self.model.state_dict(), self.best_model_path)
-                print(f"  ✅ 保存最佳模型 (验证准确率: {val_acc:.2f}%)")
+                print(f"  Saved best model (val acc: {val_acc:.2f}%)")
                 self.patience_counter = 0
             else:
                 self.patience_counter += 1
                 if self.patience_counter >= self.config['patience']:
-                    print(f"\n早停触发 (patience={self.config['patience']})")
+                    print(f"\nEarly stopping triggered (patience={self.config['patience']})")
                     break
         
         return self.history
 
 
 def plot_training_curves(history):
-    """绘制训练曲线 - 只显示损失和准确率"""
+    """Plot training curves - loss and accuracy"""
     plt.figure(figsize=(12, 5))
     
-    # 损失曲线
+    # Loss curves
     plt.subplot(1, 2, 1)
     plt.plot(history['train_loss'], label='Training Loss', linewidth=2)
     plt.plot(history['val_loss'], label='Validation Loss', linewidth=2)
@@ -358,7 +358,7 @@ def plot_training_curves(history):
     plt.legend()
     plt.grid(True, alpha=0.3)
     
-    # 准确率曲线
+    # Accuracy curves
     plt.subplot(1, 2, 2)
     plt.plot(history['train_acc'], label='Training Accuracy', linewidth=2)
     plt.plot(history['val_acc'], label='Validation Accuracy', linewidth=2)
@@ -374,7 +374,7 @@ def plot_training_curves(history):
 
 
 def main():
-    """主函数 - RML2016.10b版本"""
+    """Main function - RML2016.10b version"""
     config = {
         'batch_size': 128,
         'epochs': 50,
@@ -392,18 +392,18 @@ def main():
     }
     
     print("=" * 70)
-    print("BioLAMR 训练 - RML2016.10b数据集")
+    print("BioLAMR Training - RML2016.10b Dataset")
     print("=" * 70)
     
-    # 数据文件路径
+    # Data file path
     dat_file = "./data/RML2016.10b/archive/RML2016.10b.dat"
     
     if not os.path.exists(dat_file):
-        print(f"❌ 数据文件不存在: {dat_file}")
-        print("请确保数据文件位于正确的路径")
+        print(f"Data file not found: {dat_file}")
+        print("Please ensure the data file is in the correct path")
         return
     
-    # 加载数据
+    # Load data
     dataset = RML2016bDataset(dat_file, min_snr=config['min_snr'], max_snr=config['max_snr'])
     train_dataset, val_dataset, test_dataset = stratified_split(dataset)
     
@@ -412,7 +412,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=config['batch_size'],
                            shuffle=False, num_workers=config['num_workers'], pin_memory=True)
     
-    # 创建模型
+    # Create model
     model = FixedBioLAMR(
         gpt_type=config['gpt_type'],
         num_classes=len(dataset.classes),
@@ -422,14 +422,14 @@ def main():
         dropout=config['dropout']
     )
     
-    # 训练
+    # Train
     trainer = Trainer(model, train_loader, val_loader, config)
     history = trainer.train(train_loader, val_loader)
 
-    print(f"\n✅ 训练完成! 最佳验证准确率: {trainer.best_val_acc:.2f}%")
-    print(f"✅ 模型已保存: {trainer.best_model_path}")
+    print(f"\nTraining complete! Best val acc: {trainer.best_val_acc:.2f}%")
+    print(f"Model saved: {trainer.best_model_path}")
 
-    # 绘制训练曲线
+    # Plot training curves
     plot_training_curves(history)
 
 
